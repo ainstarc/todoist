@@ -1,0 +1,12 @@
+{
+  "name": "todoist",
+  "version": "1.0.0",
+  "main": "scripts/syncIssuesToTodoist.js",
+  "scripts": {
+    "sync": "node scripts/syncIssuesToTodoist.js"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.9",
+    "dotenv": "^16.3.1"
+  }
+}
