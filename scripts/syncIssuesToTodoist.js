@@ -4,7 +4,7 @@ const path = require("path");
 const fetch = require("node-fetch");
 
 const GITHUB_USERNAME = "ainstarc";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = process.env.REPO_READ_TOKEN;
 const TODOIST_TOKEN = process.env.TODOIST_TOKEN;
 const TODOIST_PROJECT_NAME = "GitHub";
 const SYNC_FILE = path.resolve(__dirname, ".last-sync.json");

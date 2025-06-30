@@ -26,7 +26,7 @@ jobs:
 
       - name: Run Sync Script
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_READ_TOKEN }}
           TODOIST_TOKEN: ${{ secrets.TODOIST_TOKEN }}
         run: node scripts/syncIssuesToTodoist.js
 
