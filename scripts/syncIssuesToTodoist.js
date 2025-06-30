@@ -4,10 +4,46 @@ const path = require("path");
 const fetch = require("node-fetch");
 
 const GITHUB_USERNAME = "ainstarc";
-const GITHUB_TOKEN = process.env.REPO_READ_TOKEN;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const TODOIST_TOKEN = process.env.TODOIST_TOKEN;
 const TODOIST_PROJECT_NAME = "GitHub";
 const SYNC_FILE = path.resolve(__dirname, ".last-sync.json");
+
+const SELECTED_PUBLIC_REPOS = [
+  ".github",
+  "bingo-game",
+  "Countdown",
+  "encryption-hub",
+  "garments-site",
+  "garments-studio",
+  "git-init",
+  "git-init-api",
+  "Guess-the-Roll",
+  "ipo-gmp",
+  "ipo-gmp-backend",
+  "pixel-realm",
+  "the-ain-verse",
+  "todoist",
+];
+
+const REPO_TO_SECTION_MAP = {
+  "ipo-gmp": "IPO GMP",
+  "ipo-gmp-backend": "IPO GMP",
+  "git-init": "GitBot",
+  "git-init-api": "GitBot",
+  "garments-site": "Garments",
+  "garments-studio": "Garments",
+  "encryption-hub": "Meta",
+  ".github": "Meta",
+  "the-ain-verse": "Meta",
+  "todoist": "Meta",
+  "bingo-game": "Games",
+  "Countdown": "Games",
+  "Guess-the-Roll": "Games",
+  "pixel-realm": "Games",
+};
+
+const DEFAULT_SECTION = "Default";
 
 function getLastSyncTime() {
   if (fs.existsSync(SYNC_FILE)) {
@@ -40,8 +76,16 @@ async function getRepos() {
       console.error(`🔍 Response body:\n${text}`);
       return [];
     }
-    console.log(`📦 Fetched ${json.length} repositories`);
-    return json;
+
+    const filtered = json.filter(
+      (repo) =>
+        !repo.private &&
+        repo.owner.login.toLowerCase() === GITHUB_USERNAME.toLowerCase()
+    );
+
+    console.log(`📦 ${filtered.length} public owned repositories found`);
+    console.log("🔗 Repositories:", filtered.map((r) => r.name).join(", "));
+    return filtered;
   } catch (e) {
     console.error("❌ Failed to parse JSON response from GitHub");
     console.error(text);
@@ -57,167 +101,165 @@ async function getIssues(repo, since) {
     headers: { Authorization: `token ${GITHUB_TOKEN}` },
   });
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error(
-      `❌ Failed to fetch issues for ${repo}: ${res.status} ${res.statusText}`
-    );
-    console.error(`🔎 Response: ${errorText}`);
-    return []; // return empty array so it's still iterable
-  }
+  if (!res.ok) return [];
 
   const data = await res.json();
-  console.log(`🔍 ${repo}: ${data.length} issue(s) fetched`);
-  return data;
+  return data.filter((i) => !i.pull_request);
+}
+
+async function getPullRequests(repo) {
+  const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${repo}/pulls?state=open&per_page=100`;
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
+
+  if (!res.ok) return [];
+  return await res.json();
 }
 
 async function getTodoistProjects() {
   const res = await fetch("https://api.todoist.com/rest/v2/projects", {
     headers: { Authorization: `Bearer ${TODOIST_TOKEN}` },
   });
-  const projects = await res.json();
-  //   console.log("🗂️ Available Todoist Projects:");
-  //   projects.forEach((p) => console.log(`  - ${p.name} (id: ${p.id})`));
-  return projects;
+  return await res.json();
 }
 
 async function getTodoistSections(projectId) {
   const res = await fetch(
     `https://api.todoist.com/rest/v2/sections?project_id=${projectId}`,
-    {
-      headers: { Authorization: `Bearer ${TODOIST_TOKEN}` },
-    }
+    { headers: { Authorization: `Bearer ${TODOIST_TOKEN}` } }
   );
-  const data = await res.json();
-  console.log(`📁 Found ${data.length} section(s) in project ${projectId}`);
-  return data;
+  return await res.json();
 }
 
-async function createSectionIfNotExists(projectId, repo) {
-  const sections = await getTodoistSections(projectId);
-  const existing = sections.find(
-    (sec) => sec.name.toLowerCase() === repo.toLowerCase()
+async function createSectionIfNotExists(projectId, sectionName, currentSections) {
+  const existing = currentSections.find(
+    (s) => s.name.toLowerCase() === sectionName.toLowerCase()
   );
-
   if (existing) {
-    console.log(`✅ Section '${repo}' already exists`);
+    console.log(`✅ Reusing section: ${sectionName}`);
     return existing.id;
   }
 
-  console.log(`➕ Creating new section: ${repo}`);
+  if (currentSections.length >= 20) {
+    console.warn(`⚠️ Max section limit reached. Skipping: ${sectionName}`);
+    return null;
+  }
+
   const res = await fetch("https://api.todoist.com/rest/v2/sections", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${TODOIST_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      name: repo,
-      project_id: projectId,
-    }),
+    body: JSON.stringify({ name: sectionName, project_id: projectId }),
   });
 
-  const newSection = await res.json();
-  console.log(`✅ Section '${repo}' created with ID ${newSection.id}`);
-  return newSection.id;
+  const json = await res.json();
+  console.log(`➕ Created new section: ${sectionName}`);
+  return json.id;
 }
 
 async function createTodoistTask(title, url, repo, projectId, sectionId) {
+  const payload = {
+    content: title,
+    description: `GitHub: ${url}\nRepo: ${repo}`,
+    project_id: projectId,
+  };
+  if (sectionId) payload.section_id = sectionId;
+
   const res = await fetch("https://api.todoist.com/rest/v2/tasks", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${TODOIST_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      content: title,
-      description: `GitHub: ${url}`,
-      project_id: projectId,
-      section_id: sectionId,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
-    console.error(
-      `❌ Failed to create task '${title}' in section '${repo}': ${await res.text()}`
-    );
-  } else {
-    console.log(`📝 Created task: '${title}' in section '${repo}'`);
+    console.warn(`❌ Failed to create task "${title}" — ${res.status}`);
+    return false;
   }
+  return true;
 }
 
 (async () => {
   try {
-    const lastSync = getLastSyncTime();
     console.log("🔄 Starting sync process...");
+    const lastSync = getLastSyncTime();
     const now = new Date().toISOString();
-
-    if (lastSync) {
-      console.log(`🕒 Last sync was at ${lastSync}`);
-    } else {
-      console.log("🕒 No last sync found, syncing all open issues");
-    }
 
     const projects = await getTodoistProjects();
     const project = projects.find(
       (p) => p.name.toLowerCase() === TODOIST_PROJECT_NAME.toLowerCase()
     );
-
-    if (!project)
-      throw new Error(
-        `🚫 Todoist project '${TODOIST_PROJECT_NAME}' not found.`
-      );
-
-    console.log(
-      `📌 Using Todoist Project: ${project.name} (ID: ${project.id})`
-    );
+    if (!project) throw new Error("🚫 Todoist project not found");
 
     const repos = await getRepos();
+    const sections = await getTodoistSections(project.id);
+    const sectionNames = [...new Set(Object.values(REPO_TO_SECTION_MAP))];
+    sectionNames.push("Pull Requests", DEFAULT_SECTION);
 
-    const IGNORED_REPOS = [
-      "Quizapp",
-      "Assignment"
-    ];
+    const sectionIds = {};
+    for (const name of sectionNames) {
+      sectionIds[name] = await createSectionIfNotExists(
+        project.id,
+        name,
+        sections
+      );
+    }
+
+    let taskCount = 0;
 
     for (const repo of repos) {
-      if (IGNORED_REPOS.includes(repo.name)) {
-        console.log(`🚫 Skipping ignored repo: ${repo.name}`);
-        continue;
-      }
+      const repoName = repo.name;
+      const section =
+        REPO_TO_SECTION_MAP[repoName] ||
+        (SELECTED_PUBLIC_REPOS.includes(repoName) ? repoName : DEFAULT_SECTION);
 
-      console.log(`\n🔧 Processing repo: ${repo.name}`);
-      const issues = await getIssues(repo.name, lastSync);
+      const sectionId = sectionIds[section];
+      console.log(`\n🔧 Processing "${repoName}" under section "${section}"`);
 
-      if (!Array.isArray(issues)) {
-        console.warn(
-          `⚠️ Skipping repo '${repo.name}' — issues response invalid`
-        );
-        continue;
-      }
-
-      const sectionId = await createSectionIfNotExists(project.id, repo.name);
+      const issues = await getIssues(repoName, lastSync);
+      console.log(`🔍 Found ${issues.length} issue(s)`);
 
       for (const issue of issues) {
         if (
-          !issue.pull_request &&
-          new Date(issue.created_at) > new Date(lastSync || 0)
+          issue.title.trim() ===
+          "[Hygiene] Apply README, CHANGELOG, SW, and Post-PR Fixes #1"
         ) {
-          console.log(`➡️  Adding issue: "${issue.title}"`);
-          await createTodoistTask(
-            issue.title,
-            issue.html_url,
-            repo.name,
-            project.id,
-            sectionId
-          );
-        } else {
-          console.log(`⏭️ Skipping old or PR issue: "${issue.title}"`);
+          console.log(`⚠️ Skipping hygiene issue in ${repoName}`);
+          continue;
         }
+
+        const success = await createTodoistTask(
+          issue.title,
+          issue.html_url,
+          repoName,
+          project.id,
+          sectionId
+        );
+        if (success) taskCount++;
+      }
+
+      const prs = await getPullRequests(repoName);
+      console.log(`🔍 Found ${prs.length} pull request(s)`);
+
+      for (const pr of prs) {
+        const success = await createTodoistTask(
+          `[PR] ${pr.title}`,
+          pr.html_url,
+          repoName,
+          project.id,
+          sectionIds["Pull Requests"]
+        );
+        if (success) taskCount++;
       }
     }
 
     setLastSyncTime(now);
-    console.log("\n✅ Sync complete.");
+    console.log(`\n✅ Sync complete. Total tasks created: ${taskCount}`);
   } catch (err) {
     console.error("❌ Error syncing issues:", err);
     process.exit(1);

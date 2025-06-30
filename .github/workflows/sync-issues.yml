@@ -2,7 +2,7 @@ name: Sync GitHub Issues to Todoist
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # 9 AM IST every day
+    - cron: "0 3 * * *" # 9 AM IST every day
   workflow_dispatch:
 
 permissions:
@@ -13,8 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -26,7 +28,7 @@ jobs:
 
       - name: Run Sync Script
         env:
-          GITHUB_TOKEN: ${{ secrets.REPO_READ_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_READ }}
           TODOIST_TOKEN: ${{ secrets.TODOIST_TOKEN }}
         run: node scripts/syncIssuesToTodoist.js
 
@@ -34,6 +36,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main  
           git add scripts/.last-sync.json
-          git commit -m "chore(sync): update last sync timestamp [skip ci]" || echo "No changes"
+          git commit -m "chore(sync): update last sync timestamp [skip ci]" || echo "No changes to commit"
           git push
