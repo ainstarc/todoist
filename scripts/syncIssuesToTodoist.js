@@ -23,12 +23,30 @@ function setLastSyncTime(timestamp) {
 }
 
 async function getRepos() {
-  const res = await fetch(`https://api.github.com/user/repos?per_page=100`, {
-    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  const res = await fetch("https://api.github.com/user/repos?per_page=100", {
+    headers: {
+      Authorization: `token ${GITHUB_TOKEN}`,
+      "User-Agent": "GitHub-to-Todoist-Sync",
+      Accept: "application/vnd.github+json",
+    },
   });
-  const data = await res.json();
-  console.log(`📦 Fetched ${data.length} repositories`);
-  return data;
+
+  const text = await res.text();
+
+  try {
+    const json = JSON.parse(text);
+    if (!res.ok) {
+      console.error(`❌ GitHub API error ${res.status}: ${res.statusText}`);
+      console.error(`🔍 Response body:\n${text}`);
+      return [];
+    }
+    console.log(`📦 Fetched ${json.length} repositories`);
+    return json;
+  } catch (e) {
+    console.error("❌ Failed to parse JSON response from GitHub");
+    console.error(text);
+    return [];
+  }
 }
 
 async function getIssues(repo, since) {
@@ -58,8 +76,8 @@ async function getTodoistProjects() {
     headers: { Authorization: `Bearer ${TODOIST_TOKEN}` },
   });
   const projects = await res.json();
-//   console.log("🗂️ Available Todoist Projects:");
-//   projects.forEach((p) => console.log(`  - ${p.name} (id: ${p.id})`));
+  //   console.log("🗂️ Available Todoist Projects:");
+  //   projects.forEach((p) => console.log(`  - ${p.name} (id: ${p.id})`));
   return projects;
 }
 
@@ -156,7 +174,17 @@ async function createTodoistTask(title, url, repo, projectId, sectionId) {
 
     const repos = await getRepos();
 
+    const IGNORED_REPOS = [
+      "Quizapp",
+      "Assignment"
+    ];
+
     for (const repo of repos) {
+      if (IGNORED_REPOS.includes(repo.name)) {
+        console.log(`🚫 Skipping ignored repo: ${repo.name}`);
+        continue;
+      }
+
       console.log(`\n🔧 Processing repo: ${repo.name}`);
       const issues = await getIssues(repo.name, lastSync);
 
